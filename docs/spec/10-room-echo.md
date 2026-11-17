@@ -161,7 +161,7 @@ The outer 24 cells are given over to the absorbing layer of section 5.3.
 Each cell is either "air" or "wall." A wall cell's pressure is always 0 and is not updated. Air cells are updated with the following rule.
 
 ```
-p_next = [ (2 − K·λ²)·p + λ²·S − (1 − B − D)·p_prev ] / (1 + B + D)
+p_next = [ (2 − K·λ² − E)·p + λ²·S + C − (1 − B − D)·p_prev ] / (1 + B + D)
 ```
 
 | Symbol | Meaning |
@@ -171,18 +171,45 @@ p_next = [ (2 − K·λ²)·p + λ²·S − (1 − B − D)·p_prev ] / (1 + B +
 | S | The sum of the pressures of the neighbors that are air |
 | B | (λ/2) × "the sum of β over neighbors that are wall." β is the material's absorption strength (section 5.4) |
 | D | σ·Δt. σ is the damping strength, the sum of the absorbing layer (section 5.3) and floor (section 5.5) values |
+| E, C | Terms used only inside the outer absorbing layer (section 5.3). 0 outside the layer |
 
-Check: where there are no walls and no damping, K = 4 and B = D = 0, which matches the standard rule `p_next = 2p − p_prev + λ²(S − 4p)`.
+Check: where there are no walls and no damping, K = 4 and B = D = E = C = 0, which matches the standard rule `p_next = 2p − p_prev + λ²(S − 4p)`.
 
-K and B are recomputed on the CPU only when walls are redrawn, and sent to the GPU.
+K, B, and D are recomputed on the CPU only when walls are redrawn, and sent to the GPU. E and C depend only on the cell's position, so they are computed on the GPU.
+
+S may be computed as the sum of the pressures of all four neighbors (since a wall cell's pressure is always 0). Only for the one step right after an air cell is redrawn as wall, its old pressure is read by its neighbors.
 
 ### 5.3 Outer absorbing layer
 
-So that waves leaving the domain don't come back, damping is gradually strengthened over the outer 24 cells.
+So that waves leaving the domain don't come back, the outer 24 cells form an absorbing layer.
 
-- `σ(d) = σ_max · (d / 24)²`, where d is the depth (in cells) from the layer's inner edge.
-- The initial value of σ_max is `σ_max·Δt = 0.15`. Tune it in M0 so the reflection is −30 dB or below.
+- `σ(d) = σ_max · (d / 24)²`, where d is the depth (in cells) from the layer's inner edge. Compute it separately for the x and y directions (σx, σy), and put their sum into D. In the corners, both apply.
+- `σ_max·Δt = 0.15` (finalized in M0).
 - The outermost edge of the domain is treated as a wall with β = 1.
+- The layer is a matched layer (PML). Layer cells carry the particle velocity v (multiplied by ρc) through their right and bottom faces, updated half a step offset from the pressure.
+
+```
+v_next = [ (1 − s)·v − λ·(p_far − p_near) ] / (1 + s)        s is σ·Δt at that face
+
+E = 4·sx·sy
+C = λ·[ (sx_R − sy)·(v_R + v_R,next) − (sx_L − sy)·(v_L + v_L,next)
+      + (sy_B − sx)·(v_B + v_B,next) − (sy_T − sx)·(v_T + v_T,next) ]
+```
+
+| Symbol | Meaning |
+|---|---|
+| sx, sy | σ·Δt in the x and y directions at the cell center |
+| sx_R, sx_L, sy_B, sy_T | σ·Δt at the cell's right, left, bottom, and top faces |
+| v_R, v_L, v_B, v_T | The velocity through the four faces. 0 on faces touching a wall (the wall's absorption is handled entirely by B) |
+| p_far − p_near | The pressure difference between the two cells on either side of the face (right or bottom cell − left or top cell) |
+
+For a layer in only one direction, this rule is exactly the same as Berenger's split-field PML. Cells touching the layer's inner edge (the first cell outside the layer) are also updated with this rule, since one of their faces lies in the layer.
+
+What M0 found (numbers in `docs/measurements.md`):
+
+- The original plan was a layer with damping (D) only. That can't meet −30 dB. To low frequencies, a damping-only layer looks just like a wall: with σ_max·Δt = 0.15 it reflects as much as −4 dB at 63 Hz. Lowering σ_max makes high frequencies bounce off the β = 1 wall instead (−16 dB at 4 kHz, because the wall rule in section 5.4 is first-order accurate). For every σ_max, some band exceeded −30 dB.
+- With a matched layer of the same thickness and the same σ_max, normal-incidence reflection is −70 dB or below across all bands. Oblique reflection is −64 dB up to 45°, −53 dB at 60°, and −31 dB at 75°.
+- It stays stable even with walls crossing the layer (confirmed over 200,000+ steps).
 
 ### 5.4 Wall materials
 
@@ -203,6 +230,8 @@ Provisional values (replace with sourced values in M1, with sources listed in `T
 
 Absorption actually varies with frequency, but this idea represents it with a single value.
 
+M0 measurement: the wall rule is first-order accurate, and the reflection coefficient drifts from the set value as the wavelength approaches the grid spacing. Up to 1 kHz the drift is 0.005 or less. At 4 kHz, the reflection coefficient of an α = 0.9 wall is 0.36 (set value 0.32), and even α = 1 leaves 0.16. This is within the ±0.05 criterion.
+
 ### 5.5 Approximating the floor and ceiling
 
 The 2D computation has no floor or ceiling, so as-is the reverberation would be far too long. Add the absorption by the floor and ceiling as damping uniform over the whole room.
@@ -218,7 +247,7 @@ The 2D computation has no floor or ceiling, so as-is the reverberation would be 
 
 ### 5.6 Sound sources
 
-- Add values into the source cell and the cells within a radius of 2 cells around it, with Gaussian weights.
+- Add values into the source cell and the cells within a radius of 2 cells around it, with Gaussian weights. The weights have a standard deviation of 1 cell and are normalized so the 13 cells sum to 1. Nothing is added into wall cells.
 - **Clap (for display)**: one Ricker wavelet with a center frequency of 800 Hz.
 - **Tone**: a continuous sine wave. Frequency via a 50–2000 Hz slider. On start, the volume ramps up over 20 ms.
 - **For recording the response**: a short pulse band-limited at 4 kHz (windowed sinc, 129 points).
@@ -255,15 +284,21 @@ Calibration is done once, at development time. Redo it if the grid spacing chang
 src/
   sim/                 Computation that never touches the DOM
     grid.ts            Constants, sizes
+    sim.ts             Interface shared by the reference implementation and the GPU version
     reference.ts       CPU version of the update rule (reference implementation)
-    geometry.ts        Wall lines → cells → K and B
+    geometry.ts        Wall lines → cells → K, B, and D; σ of the absorbing layer
     materials.ts       Material table, α → β
-    ir.ts              Calibration filter, band splitting, decay curve, RT60
+    sources.ts         Source signals and weights
+    analysis.ts        FFT, peak detection
+    experiments.ts     Scenes that check M0's "Done when" criteria (shared by the reference and GPU versions)
+    rng.ts             Seeded random numbers
+    ir.ts              Calibration filter, band splitting, decay curve, RT60 (M2)
   gpu/
     solver.ts          WebGPU computation
     render.ts          Display (Wave, Relief, Energy)
     shaders/*.wgsl
     fallback/          WebGL2 version (display only)
+  bench/               Measurement page (/bench)
   audio/engine.ts      Playback, convolution, recording
   ui/                  React components
   state/               store.ts, url.ts
@@ -283,8 +318,9 @@ Source signal ──────────────────────
 Decisions to fix for the GPU implementation:
 
 - Sound pressure is held in three 32-bit float arrays (previous, current, next), whose roles rotate each step.
+- The face velocities of the absorbing layer (section 5.3) are held in two arrays of two components per cell, swapped each step. Combined with the three pressure arrays, that makes six combinations. Only layer cells read and write these values.
 - While displaying, run a few steps per frame; while recording, run a few hundred steps per frame in one batch.
-- Values that change each step (the step number, the source value) must be passed correctly even when steps are batched. Note that rewriting the same uniform midway is not reflected in a batched run.
+- Values that change each step (the step number, the source value) must be passed correctly even when steps are batched. Note that rewriting the same uniform midway is not reflected in a batched run. M0 implementation: write ahead into a buffer laid out as one 256-byte slot per step, and select the slot each step with a dynamic offset. At most 512 steps per batch.
 - On devices without WebGPU, use WebGL2 at half the grid resolution for display only, and show "Listening needs WebGPU."
 
 State stored in the URL:
@@ -313,6 +349,23 @@ Done when:
 5. Steps per second are measured and recorded for S, M, and L.
 
 Decision: if 48,000 steps at size M take 30 seconds or less, proceed as is. If they take longer, consider coarsening the grid for listening only (Δx doubled, band about 2 kHz) and correct the spec.
+
+Results (2026-11-16, Apple M3, Chrome 157; details in `docs/measurements.md`):
+
+| Criterion | Measured | Verdict |
+|---|---|---|
+| 1 Outer-edge reflection | −70 dB or below head-on (all bands, 63 Hz–4 kHz). The absorbing layer was changed to a matched layer (section 5.3) | Met |
+| 2 Eigenfrequencies | 42.86, 57.14, 71.43, 85.71, 103.02 Hz. Maximum error 0.05% | Met |
+| 3 Wall reflection coefficient | 0.949, 0.708, 0.320 for α = 0.1, 0.5, 0.9 (theory 0.949, 0.707, 0.316) | Met |
+| 4 GPU version vs. reference | Maximum difference is 3.9e-6 of the maximum amplitude | Met |
+| 5 Speed | S about 17,000, M about 7,100, L about 2,700–3,000 steps/s | Recorded |
+
+Outcome of the decision: 48,000 steps at M take about 6.7 seconds. Proceed as is without coarsening the grid.
+
+Notes on how it was checked:
+
+- "Head-on" in criteria 1 and 3 is measured in a 1-cell-wide corridor between perfectly reflecting walls. The wave in the corridor becomes a plane wave hitting the end wall head-on.
+- Criterion 3's reflection coefficient is the square root of the ratio of reflected to incident energy of the 800 Hz clap waveform. The ratio of waveform peaks comes out about 0.7% lower because of waveform distortion during the round trip across the grid.
 
 ### M1 Draw and see
 

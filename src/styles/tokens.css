@@ -1,0 +1,46 @@
+/* Colour and type tokens (spec 00-common 4.2, 4.3). Dark screen. One fixed scheme, no themes. */
+:root {
+  --canvas: #0d0d0d;
+  --surface: #1a1a19;
+  --text-1: #f0efec;
+  --text-2: #c3c2b7;
+  --text-3: #898781;
+  --grid: #2c2c2a;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #0ca30c;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+
+  --seq-1: #0d366b;
+  --seq-2: #256abf;
+  --seq-3: #3987e5;
+  --seq-4: #86b6ef;
+  --seq-5: #cde2fb;
+
+  --good: #0ca30c;
+  --warn: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+
+  --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, Menlo, Consolas, monospace;
+  --size-body: 14px;
+  --size-note: 12px;
+  --size-heading: 20px;
+  --size-hero: 32px;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  line-height: 1.45;
+}
