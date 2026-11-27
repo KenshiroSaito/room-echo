@@ -29,6 +29,12 @@ export const ABSORBER_CELLS = 24;
  */
 export const ABSORBER_SIGMA_MAX_DT = 0.15;
 
+/** Time constant of the running average of p² shown by the Energy view [s] (spec 4.3). */
+export const ENERGY_TIME_CONSTANT = 0.02;
+
+/** Weight of the newest step in that average. */
+export const ENERGY_RATE = DT / ENERGY_TIME_CONSTANT;
+
 export type RoomSize = 'S' | 'M' | 'L';
 
 export interface RoomDimensions {

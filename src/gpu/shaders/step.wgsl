@@ -13,7 +13,8 @@ struct Params {
   sigmaMaxDt: f32,
   // Edges that carry the matched layer: bit 0 left, 1 right, 2 top, 3 bottom. 0 = no layer.
   layerEdges: u32,
-  _pad: u32,
+  // Weight of the newest step in the running average of p² (Energy view). 0 = off.
+  energyRate: f32,
 }
 
 // Values that change every step. One 256-byte slot per step of a batch, selected with a
@@ -31,6 +32,8 @@ struct StepParams {
 // Per cell: x = 2 − K·λ², y = B + D. y < 0 marks a wall.
 @group(0) @binding(2) var<storage, read> coeff: array<vec2<f32>>;
 @group(0) @binding(3) var<storage, read_write> recording: array<f32>;
+// Running average of p² for the Energy view. Each cell reads and writes only its own value.
+@group(0) @binding(4) var<storage, read_write> energy: array<f32>;
 
 @group(1) @binding(0) var<storage, read> pPrev: array<f32>;
 @group(1) @binding(1) var<storage, read> pCur: array<f32>;
@@ -128,6 +131,11 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     velocityNext[i] = vec2<f32>(0.0, 0.0);
   }
   pNext[i] = next;
+
+  if (params.energyRate > 0.0) {
+    let e = energy[i];
+    energy[i] = e + (next * next - e) * params.energyRate;
+  }
 
   if (stepParams.recordIndex >= 0) {
     let cell = vec2<i32>(i32(x), i32(y));

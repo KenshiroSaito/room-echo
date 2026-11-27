@@ -1,6 +1,6 @@
 // Every piece of text the screens show (spec 00-common 1). English only.
 
-import type { WallMaterialId } from './sim/materials';
+import type { FloorMaterialId, WallMaterialId } from './sim/materials';
 
 export const STRINGS = {
   appTitle: 'Room Echo',
@@ -14,9 +14,75 @@ export const STRINGS = {
     foam: 'Acoustic foam',
   } satisfies Record<WallMaterialId, string>,
 
-  home: {
-    lead: 'The simulation core is in place. The room editor arrives with the next milestone.',
-    benchLink: 'Open the measurement page',
+  floors: {
+    tile: 'Tile',
+    wood: 'Wood',
+    carpet: 'Carpet',
+    tatami: 'Tatami',
+  } satisfies Record<FloorMaterialId, string>,
+
+  tools: {
+    label: 'Tools',
+    wall: 'Wall',
+    erase: 'Erase',
+    source: 'Source',
+    undo: 'Undo',
+    redo: 'Redo',
+    wallTip:
+      'Wall (W): drag to draw. Shift keeps it straight. Click a wall to give it the selected material.',
+    eraseTip: 'Erase (E): trace over a wall to erase it, or cut a door or window opening.',
+    sourceTip: 'Source (S): click anywhere to clap there. Drag the source to move it.',
+    undoTip: 'Undo (⌘Z / Ctrl+Z)',
+    redoTip: 'Redo (⇧⌘Z / Ctrl+Y)',
+  },
+
+  panel: {
+    label: 'Room settings',
+    hide: 'Hide panel',
+    show: 'Show panel',
+    room: 'Room',
+    size: 'Size',
+    sizeDetail: (widthM: number, heightM: number) => `${widthM} × ${heightM} m`,
+    clearWalls: 'Clear walls',
+    resetRoom: 'Reset room',
+    wallMaterial: 'Wall material',
+    wallMaterialNote: 'For walls drawn next. Click a wall with the Wall tool to change it.',
+    floor: 'Floor',
+    floorNote: 'Sets how fast the whole room decays.',
+    view: 'View',
+    wave: 'Wave',
+    energy: 'Energy',
+    relief: 'Relief',
+    alpha: (alpha: number) => `α ${alpha.toFixed(2)}`,
+  },
+
+  strip: {
+    label: 'Source and time',
+    source: 'Source',
+    clap: 'Clap',
+    tone: 'Tone',
+    clapAgain: 'Clap',
+    clapAgainTip: 'Clap at the source (C)',
+    frequency: 'Frequency',
+    hz: 'Hz',
+    speed: 'Speed',
+    play: 'Play',
+    pause: 'Pause',
+    playTip: 'Play or pause (Space)',
+  },
+
+  stage: {
+    hint: 'Click anywhere to clap',
+    paused: 'Paused',
+    toneLabel: (hz: number) => `${hz} Hz`,
+    energyTop: '0 dB',
+    energyBottom: '−40 dB',
+    energyScale: 'Sound energy, relative to the loudest place',
+  },
+
+  noWebGpu: {
+    title: 'This browser has no WebGPU',
+    body: 'Room Echo computes the sound waves on the graphics card with WebGPU. Open it in a recent Chrome or Edge on a desktop or laptop computer.',
   },
 
   bench: {

@@ -13,9 +13,20 @@ import {
   measureRoomModes,
   measureWallReflection,
 } from './experiments';
-import { DEFAULT_ABSORBER, buildCoefficients, createGrid } from './geometry';
-import { COURANT } from './grid';
-import { ReferenceSim, createReferenceSim } from './reference';
+import {
+  AIR,
+  DEFAULT_ABSORBER,
+  RIGID,
+  buildCoefficients,
+  createGrid,
+  fillRect,
+  strokeRect,
+  wallCode,
+} from './geometry';
+import { COURANT, DT } from './grid';
+import { floorSigma } from './materials';
+import { cellChanges, countAir } from './sim';
+import { ReferenceSim, createReferenceSim, editField, fillFreed } from './reference';
 import { ricker } from './sources';
 
 describe('criterion 1: free field', () => {
@@ -125,6 +136,105 @@ describe('reference solver', () => {
     const b = await run();
     expect(maxAbs(a)).toBeGreaterThan(0.01);
     expect(a).toEqual(b);
+  });
+
+  it('keeps the running average of p² that the Energy view shows', async () => {
+    const { setup, source } = agreementScene();
+    const sim = new ReferenceSim(setup);
+    await sim.run(AGREEMENT_STEPS, source);
+    const [recorded] = await sim.readRecording();
+    const rate = setup.energyRate!;
+    let expected = 0;
+    for (const p of recorded) expected += (p * p - expected) * rate;
+    const energy = await sim.readEnergy();
+    const probe = setup.probes[0];
+    expect(expected).toBeGreaterThan(0);
+    // The stored average is rounded to 32 bits every step.
+    const stored = energy[probe.y * setup.nx + probe.x];
+    expect(Math.abs(stored - expected) / expected).toBeLessThan(1e-6);
+  });
+
+  it('fills the cells of a removed wall smoothly from the air around them', () => {
+    // A field that rises linearly from left to right, with a 10-cell wall strip removed.
+    const nx = 40;
+    const ny = 12;
+    const grid = createGrid(nx, ny);
+    const coeff = buildCoefficients(grid);
+    const field = new Float32Array(nx * ny);
+    const freed: number[] = [];
+    for (let y = 1; y < ny - 1; y++) {
+      for (let x = 1; x < nx - 1; x++) {
+        const i = y * nx + x;
+        if (x >= 15 && x < 25) freed.push(i);
+        else field[i] = x;
+      }
+    }
+    fillFreed(field, Uint32Array.from(freed), coeff, nx);
+    // A linear field is harmonic, so the fill reproduces it inside the strip: within 1 % of
+    // the strip's range in the middle rows.
+    for (let x = 15; x < 25; x++) {
+      expect(Math.abs(field[6 * nx + x] - x)).toBeLessThan(0.1);
+    }
+  });
+
+  it('edits the field without changing its sum: walled cells cleared, freed cells filled', () => {
+    const nx = 30;
+    const ny = 20;
+    const before = createGrid(nx, ny);
+    fillRect(before, 10, 1, 14, ny - 1, RIGID);
+    const after = createGrid(nx, ny);
+    fillRect(after, 20, 5, 22, 15, RIGID);
+    const coeff = buildCoefficients(after);
+    const field = new Float32Array(nx * ny);
+    for (let i = 0; i < field.length; i++) {
+      if (before.cells[i] === AIR) field[i] = Math.sin(i * 0.37) + 0.5;
+    }
+    const sum = (f: Float32Array) => f.reduce((a, b) => a + b, 0);
+    const total = sum(field);
+    const changes = cellChanges(before.cells, after.cells);
+    expect(changes.freed.length).toBeGreaterThan(0);
+    expect(changes.walled.length).toBeGreaterThan(0);
+    editField(field, changes, coeff, nx, countAir(coeff));
+    for (const i of changes.walled) expect(field[i]).toBe(0);
+    expect(Math.abs(sum(field) - total)).toBeLessThan(1e-3);
+  });
+
+  it('leaves no offset behind when walls change while the room sounds', async () => {
+    // A closed box with a clap inside. Halfway through the sound, the box is removed and a new
+    // wall is drawn across where the sound is. The low sound stored in the box then drains out
+    // of the domain; no uniform offset may stay behind (an offset is a steady state of the
+    // update rule, so it would never leave).
+    const n = 180;
+    const box = createGrid(n, n);
+    strokeRect(box, 40, 40, 140, 140, 10, wallCode('plaster'));
+    const open = createGrid(n, n);
+    fillRect(open, 60, 100, 120, 110, wallCode('concrete'));
+    const options = { absorber: DEFAULT_ABSORBER, uniformSigmaDt: floorSigma(0.05) * DT };
+    const sim = new ReferenceSim({
+      nx: n,
+      ny: n,
+      coeff: buildCoefficients(box, options),
+      absorber: DEFAULT_ABSORBER,
+      source: { x: 90, y: 75 },
+      probes: [
+        { x: 90, y: 75 },
+        { x: 90, y: 75 },
+      ],
+      recordCapacity: 0,
+    });
+    await sim.run(400, ricker(800));
+    const peak = maxAbs(sim.field);
+    sim.setCoefficients(buildCoefficients(open, options), cellChanges(box.cells, open.cells));
+    const mean = () => sim.field.reduce((a, b) => a + b, 0) / sim.field.length;
+    await sim.run(4000);
+    const early = { max: maxAbs(sim.field), mean: mean() };
+    await sim.run(8000);
+    const late = { max: maxAbs(sim.field), mean: mean() };
+    // Measured: max 1.6e-3 and mean 3.0e-4 of the peak after 4000 steps, then 4.9e-4 and
+    // 1.0e-4 after 12000. Without the sum correction the mean is about three times larger.
+    expect(Math.abs(early.mean)).toBeLessThan(5e-4 * peak);
+    expect(late.max).toBeLessThan(early.max / 2);
+    expect(Math.abs(late.mean)).toBeLessThan(Math.abs(early.mean) / 2);
   });
 
   it('keeps wall cells silent', async () => {

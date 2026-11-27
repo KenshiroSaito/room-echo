@@ -10,7 +10,7 @@ import {
   wallCode,
 } from './geometry';
 import { ABSORBER_CELLS, ABSORBER_SIGMA_MAX_DT, COURANT, DX, LAMBDA2, ROOM_SIZES } from './grid';
-import { betaFromAlpha, floorSigma, reflectionFromAlpha } from './materials';
+import { betaFromAlpha, floorSigma, reflectionFromAlpha, wallMaterial } from './materials';
 
 describe('grid', () => {
   it('has the spacing and the cell counts of spec 5.1', () => {
@@ -60,7 +60,8 @@ describe('buildCoefficients', () => {
     const i = 4 * 8 + 4; // foam on the left, curtain above
     expect(coeff[2 * i]).toBeCloseTo(2 - 2 * LAMBDA2, 6);
     expect(coeff[2 * i + 1]).toBeCloseTo(
-      (COURANT / 2) * (betaFromAlpha(0.9) + betaFromAlpha(0.55)),
+      (COURANT / 2) *
+        (betaFromAlpha(wallMaterial('foam').alpha) + betaFromAlpha(wallMaterial('curtain').alpha)),
       6,
     );
     const wall = 4 * 8 + 3;

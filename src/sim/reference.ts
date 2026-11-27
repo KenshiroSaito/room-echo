@@ -7,9 +7,8 @@
 // floats, like on the GPU, so the two agree to rounding.
 //
 // S is the sum over all four neighbours. That equals the sum over the air neighbours because
-// the pressure of a wall cell is always 0. When setCoefficients() turns an air cell into a
-// wall, its old pressure is read by its neighbours for one more step (1/48000 s) before it is
-// overwritten with 0. The GPU solver behaves the same way.
+// the pressure of a wall cell is always 0: when setCoefficients() turns an air cell into a
+// wall, its pressure is set to 0 at once (CellChanges in sim.ts).
 //
 // The absorbing layer
 // -------------------
@@ -30,10 +29,24 @@
 // Along one axis this is exactly the classic split-field layer (Berenger) written for a solver
 // that stores pressure only. A face that touches a wall carries no velocity; the wall's own
 // absorption stays in B.
+//
+// The Energy view
+// ---------------
+// When energyRate > 0, every cell also keeps a running average of p² (spec 4.3), updated after
+// the source is added:  e ← e + (p_next² − e)·energyRate. It does not feed back into the field.
 
 import { absorberTable } from './geometry';
 import { COURANT, LAMBDA2 } from './grid';
-import type { Absorber, Point, Sim, SimSetup } from './sim';
+import {
+  FILL_ITERATIONS,
+  FILL_REACH,
+  countAir,
+  type Absorber,
+  type CellChanges,
+  type Point,
+  type Sim,
+  type SimSetup,
+} from './sim';
 import { SOURCE_FOOTPRINT } from './sources';
 
 // Local copies: reading an imported binding inside the inner loop is slow under some
@@ -60,6 +73,8 @@ export class ReferenceSim implements Sim {
   private source: Point;
   private readonly probeIndex: [number, number];
   private readonly recording: [Float32Array, Float32Array];
+  private readonly energy: Float32Array;
+  private energyRate: number;
 
   constructor(setup: SimSetup) {
     const { nx, ny } = setup;
@@ -88,6 +103,8 @@ export class ReferenceSim implements Sim {
       new Float32Array(setup.recordCapacity),
       new Float32Array(setup.recordCapacity),
     ];
+    this.energy = new Float32Array(nx * ny);
+    this.energyRate = Math.fround(setup.energyRate ?? 0);
   }
 
   /** One step. `sourceValue` is added around the source cell with the Gaussian footprint. */
@@ -162,6 +179,15 @@ export class ReferenceSim implements Sim {
       this.recording[1][this.stepCount] = next[this.probeIndex[1]];
     }
 
+    const rate = this.energyRate;
+    if (rate > 0) {
+      const energy = this.energy;
+      for (let i = 0; i < nx * ny; i++) {
+        const e = energy[i];
+        energy[i] = e + (next[i] * next[i] - e) * rate;
+      }
+    }
+
     this.prev = cur;
     this.cur = next;
     this.next = prev;
@@ -176,13 +202,22 @@ export class ReferenceSim implements Sim {
     }
   }
 
-  setCoefficients(coeff: Float32Array): void {
+  setCoefficients(coeff: Float32Array, changes?: CellChanges): void {
     if (coeff.length !== this.nx * this.ny * 2) throw new Error('coeff has the wrong size');
     this.coeff = coeff;
+    if (changes && (changes.freed.length > 0 || changes.walled.length > 0)) {
+      const air = countAir(coeff);
+      editField(this.cur, changes, coeff, this.nx, air);
+      editField(this.prev, changes, coeff, this.nx, air);
+    }
   }
 
   setSource(source: Point): void {
     this.source = source;
+  }
+
+  setEnergyRate(rate: number): void {
+    this.energyRate = Math.fround(rate);
   }
 
   async readRecording(): Promise<[Float32Array, Float32Array]> {
@@ -194,12 +229,95 @@ export class ReferenceSim implements Sim {
     return this.cur.slice();
   }
 
+  async readEnergy(): Promise<Float32Array> {
+    return this.energy.slice();
+  }
+
   /** The current field without a copy. Valid until the next step. */
   get field(): Float32Array {
     return this.cur;
   }
 
   destroy(): void {}
+}
+
+/**
+ * Edit one pressure field after the walls changed (CellChanges in sim.ts): clear the walled
+ * cells, fill the freed ones, and spread the change of the field's sum over all air cells.
+ * The GPU solver does the same steps in the same order (edit.wgsl).
+ */
+export function editField(
+  field: Float32Array,
+  changes: CellChanges,
+  coeff: Float32Array,
+  nx: number,
+  air: number,
+): void {
+  let removed = 0;
+  for (const i of changes.walled) {
+    removed += field[i];
+    field[i] = 0;
+  }
+  if (changes.freed.length > 0) fillFreed(field, changes.freed, coeff, nx);
+  let added = 0;
+  for (const i of changes.freed) added += field[i];
+  if (air === 0) return;
+  const shift = (added - removed) / air;
+  for (let i = 0; i < field.length; i++) if (coeff[2 * i + 1] >= 0) field[i] -= shift;
+}
+
+/**
+ * Fill the freed cells of one pressure field from the air around them (see FILL_REACH in
+ * sim.ts). The GPU solver does exactly the same (fill.wgsl): the same walks, the same order of
+ * the four directions (left, right, up, down), the same sweeps.
+ */
+export function fillFreed(
+  field: Float32Array,
+  freed: Uint32Array,
+  coeff: Float32Array,
+  nx: number,
+): void {
+  const isFreed = new Uint8Array(field.length);
+  for (const i of freed) isFreed[i] = 1;
+  const steps = [-1, 1, -nx, nx];
+  const next = new Float32Array(freed.length);
+
+  // First guess, from the nearest known air in the four directions.
+  for (let j = 0; j < freed.length; j++) {
+    const i = freed[j];
+    let sum = 0;
+    let weight = 0;
+    for (const step of steps) {
+      for (let k = 1; k <= FILL_REACH; k++) {
+        const at = i + k * step;
+        if (coeff[2 * at + 1] < 0) break;
+        if (isFreed[at] === 0) {
+          sum += field[at] / k;
+          weight += 1 / k;
+          break;
+        }
+      }
+    }
+    next[j] = weight > 0 ? sum / weight : 0;
+  }
+  for (let j = 0; j < freed.length; j++) field[freed[j]] = next[j];
+
+  // Smoothing sweeps.
+  for (let k = 0; k < FILL_ITERATIONS; k++) {
+    for (let j = 0; j < freed.length; j++) {
+      const i = freed[j];
+      let sum = 0;
+      let n = 0;
+      for (const step of steps) {
+        if (coeff[2 * (i + step) + 1] >= 0) {
+          sum += field[i + step];
+          n++;
+        }
+      }
+      next[j] = n > 0 ? sum / n : 0;
+    }
+    for (let j = 0; j < freed.length; j++) field[freed[j]] = next[j];
+  }
 }
 
 /**

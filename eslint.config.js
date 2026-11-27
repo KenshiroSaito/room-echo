@@ -1,4 +1,5 @@
 import js from '@eslint/js';
+import reactHooks from 'eslint-plugin-react-hooks';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
@@ -10,6 +11,10 @@ export default tseslint.config(
     languageOptions: {
       globals: { ...globals.browser, ...globals.node },
     },
+  },
+  {
+    files: ['src/**/*.tsx'],
+    ...reactHooks.configs.flat.recommended,
   },
   {
     // The simulation core must be reproducible: seeded generators only (spec 00-common 3.2).

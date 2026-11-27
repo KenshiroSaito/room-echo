@@ -1,0 +1,52 @@
+.strip {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 96px;
+  padding: 0 20px;
+  box-sizing: border-box;
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Fixed width, so switching Clap and Tone does not move the speed control. */
+.sourceDetail {
+  width: 380px;
+}
+
+.toneSlider {
+  width: 150px;
+}
+
+.speed {
+  width: 340px;
+}
+
+.speedValue {
+  flex: none;
+  width: 92px;
+}
+
+.play {
+  flex: none;
+  width: 36px;
+  padding: 0;
+}
+
+@media (max-width: 767px) {
+  .strip {
+    height: 64px;
+    gap: 12px;
+    padding: 0 12px;
+    overflow-x: auto;
+  }
+}

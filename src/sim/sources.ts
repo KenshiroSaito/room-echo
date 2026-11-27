@@ -70,6 +70,89 @@ export function differentiate(signal: Float32Array): Float32Array {
   return out;
 }
 
+/** The display clap (spec 5.6). */
+export const CLAP_CENTER_HZ = 800;
+export const TONE_MIN_HZ = 50;
+export const TONE_MAX_HZ = 2000;
+/** Fade-in and fade-out of the tone [s]. */
+export const TONE_RAMP_SECONDS = 0.02;
+/**
+ * Amplitude of the tone's source value: TONE_SOURCE_GAIN·√(ω·Δt). A 2D source of amplitude
+ * ω·Δt radiates a field that grows as √f, so this keeps the tone at about the level of a clap
+ * at 1 m (0.10) at every frequency from 50 Hz to 2 kHz (scripts/display-levels.ts).
+ */
+export const TONE_SOURCE_GAIN = 3.0;
+
+/**
+ * Source values for the display, one per step: claps (Ricker wavelets, which may overlap) and
+ * the tone. The tone keeps its phase when its frequency changes, and fades in and out over
+ * 20 ms, so neither makes a click in the field.
+ */
+export class DisplaySource {
+  private readonly clapShape = ricker(CLAP_CENTER_HZ);
+  /** Steps into each clap still sounding. */
+  private claps: number[] = [];
+  private toneOn = false;
+  private toneHz = 440;
+  private phase = 0;
+  /** 0 (silent) to 1 (full), moved linearly over the ramp. */
+  private envelope = 0;
+  private readonly rampSteps: number;
+
+  constructor(private readonly sampleRate = SAMPLE_RATE) {
+    this.rampSteps = Math.max(1, Math.round(TONE_RAMP_SECONDS * sampleRate));
+  }
+
+  clap(): void {
+    this.claps.push(0);
+  }
+
+  setTone(on: boolean, hz: number): void {
+    this.toneOn = on;
+    this.toneHz = Math.min(TONE_MAX_HZ, Math.max(TONE_MIN_HZ, hz));
+  }
+
+  /** Stop everything at once (the field is being cleared). */
+  silence(): void {
+    this.claps = [];
+    this.envelope = 0;
+    this.phase = 0;
+  }
+
+  /** True while a clap or the tone is still adding to the field. */
+  get sounding(): boolean {
+    return this.claps.length > 0 || this.toneOn || this.envelope > 0;
+  }
+
+  /** Write the next `steps` source values into `out`. */
+  fill(out: Float32Array, steps: number): void {
+    const shape = this.clapShape;
+    const w = (2 * Math.PI * this.toneHz) / this.sampleRate;
+    const amplitude = TONE_SOURCE_GAIN * Math.sqrt(w);
+    const rampStep = 1 / this.rampSteps;
+    for (let i = 0; i < steps; i++) {
+      let value = 0;
+      for (let k = 0; k < this.claps.length; k++) {
+        const at = this.claps[k];
+        if (at < shape.length) value += shape[at];
+        this.claps[k] = at + 1;
+      }
+      if (this.toneOn) this.envelope = Math.min(1, this.envelope + rampStep);
+      else this.envelope = Math.max(0, this.envelope - rampStep);
+      if (this.envelope > 0) {
+        const gain = 0.5 - 0.5 * Math.cos(Math.PI * this.envelope);
+        value += amplitude * gain * Math.sin(this.phase);
+        this.phase += w;
+        if (this.phase > 2 * Math.PI) this.phase -= 2 * Math.PI;
+      } else {
+        this.phase = 0;
+      }
+      out[i] = value;
+    }
+    this.claps = this.claps.filter((at) => at < shape.length);
+  }
+}
+
 /** A sine that fades in over `rampSeconds` (the "Tone" source). */
 export function tone(
   frequencyHz: number,

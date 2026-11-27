@@ -36,6 +36,7 @@ test('M0 criteria hold on the GPU solver', async ({ page }) => {
   for (const wall of results.wall ?? []) expect(Math.abs(wall.error)).toBeLessThanOrEqual(0.05);
   // 4 · GPU and reference agree
   expect(results.agreement?.relative).toBeLessThanOrEqual(1e-4);
+  expect(results.agreement?.energyRelative).toBeLessThanOrEqual(1e-4);
   // 5 · speed measured for S, M, L; M takes 48,000 steps within 30 s
   expect(results.throughput.map((t) => t.size)).toEqual(['S', 'M', 'L']);
   expect(results.decision?.seconds).toBeLessThanOrEqual(30);

@@ -1,0 +1,80 @@
+.toolbar {
+  position: fixed;
+  top: 60px;
+  left: 12px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 72px;
+  padding: 6px;
+  box-sizing: border-box;
+}
+
+.tool {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 0 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--size-note);
+  cursor: pointer;
+  transition:
+    background-color 150ms ease-out,
+    color 150ms ease-out;
+}
+
+.tool:hover {
+  color: var(--text-1);
+  background: color-mix(in srgb, var(--text-1) 6%, transparent);
+}
+
+.tool[aria-pressed='true'] {
+  color: var(--text-1);
+  background: color-mix(in srgb, var(--text-1) 14%, transparent);
+}
+
+.tool:focus-visible,
+.small:focus-visible {
+  outline: 2px solid var(--text-2);
+  outline-offset: 1px;
+}
+
+.rule {
+  height: 1px;
+  margin: 2px 4px;
+  background: var(--grid);
+}
+
+.history {
+  display: flex;
+  justify-content: space-between;
+}
+
+.small {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.small:hover:not(:disabled) {
+  color: var(--text-1);
+  background: color-mix(in srgb, var(--text-1) 8%, transparent);
+}
+
+.small:disabled {
+  color: var(--grid);
+  cursor: default;
+}

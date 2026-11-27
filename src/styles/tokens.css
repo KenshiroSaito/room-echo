@@ -22,6 +22,20 @@
   --seq-4: #86b6ef;
   --seq-5: #cde2fb;
 
+  /* Diverging (Wave view): negative is the quantity blues, the midpoint is the canvas, positive
+     is reds of the same lightness with #e66767 in the middle (scripts/palette.ts). */
+  --div-neg-1: var(--seq-1);
+  --div-neg-2: var(--seq-2);
+  --div-neg-3: var(--seq-3);
+  --div-neg-4: var(--seq-4);
+  --div-neg-5: var(--seq-5);
+  --div-mid: var(--canvas);
+  --div-pos-1: #611b1e;
+  --div-pos-2: #b03f42;
+  --div-pos-3: #e66767;
+  --div-pos-4: #e99a97;
+  --div-pos-5: #fad6d4;
+
   --good: #0ca30c;
   --warn: #fab219;
   --serious: #ec835a;
