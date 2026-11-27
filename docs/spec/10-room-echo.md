@@ -95,6 +95,12 @@ The star of this idea is how the wave field itself looks.
 - **Color**: paint sound pressure with the diverging palette. Positive (compression) is on the red side, negative (rarefaction) on the blue side, and 0 is the canvas background. Quiet areas sink into the background, and only the waves appear to glow.
 - **Tone mapping**: compress before mapping to color so weak reflections are visible too. `v = sign(p) · (1 − exp(−k·|p|·g))`, where `k` is fixed and `g` is the automatic gain below.
 - **Automatic gain**: when the field's amplitude gets small, raise `g` so late reflections stay visible. Raise it quickly and lower it slowly. While `g > 1`, show the factor, as in "Gain ×8."
+- Fixed in M1 (`src/sim/display.ts`):
+  - `g = 1` means the loudest cell is as loud as a clap 1 m from the source in free field (0.1027, measured by `scripts/display-levels.ts`), and `g` aims at that reference divided by the loudest cell.
+  - The gain rises with a time constant of 0.15 s of display time and falls with 0.8 s. A clap or the start of the tone resets it to 1 and holds it there for 260 steps (the clap itself and its travel to 0.5 m), so the gain does not race up while the field is still silent.
+  - The gain stops at ×100 (40 dB, the range of the Energy view), so a room that has gone quiet looks quiet. At ×1000 the picture showed whatever was left 60 dB down.
+  - `k = 1.5 / 0.1027`: the loudest cell maps to `v ≈ 0.78` and a reflection ten times weaker to 0.14. Chosen by eye: at 1.0 the walls' hit flashes were hard to see; at 3.0 a reverberant room flooded with the brightest colours.
+  - Cells within 30 cm of a playing tone are left out of the loudest-cell search: next to the source they are far louder than the room.
 - **Time**: show it at about 1/120 of real time (a wave crosses an 8 m room in about 3 seconds). Display the factor and elapsed time as "t = 12.4 ms · Slowed 120×." The speed can be changed.
 
 ### 4.2 Relief (relief shading, on by default)
@@ -177,7 +183,15 @@ Check: where there are no walls and no damping, K = 4 and B = D = E = C = 0, whi
 
 K, B, and D are recomputed on the CPU only when walls are redrawn, and sent to the GPU. E and C depend only on the cell's position, so they are computed on the GPU.
 
-S may be computed as the sum of the pressures of all four neighbors (since a wall cell's pressure is always 0). Only for the one step right after an air cell is redrawn as wall, its old pressure is read by its neighbors.
+S may be computed as the sum of the pressures of all four neighbors, since a wall cell's pressure is always 0.
+
+When walls are redrawn, the pressure field is edited at the same moment, in both the current and the previous field (found in M1; `CellChanges` in `src/sim/sim.ts`):
+
+1. Cells that became wall are set to 0 at once.
+2. Cells that became air are filled smoothly from the air around them. From each freed cell, look left, right, up and down for the nearest air cell that was not freed (at most 32 cells, and not through a wall). Take the mean of those values weighted by 1 / distance, then smooth it with 32 sweeps that set every freed cell to the mean of its air neighbours.
+3. Steps 1 and 2 change the sum of the field. The difference is spread evenly over all air cells, so the sum stays what it was.
+
+Why: a uniform offset is a steady state of this rule, because D, B and the absorbing layer all act on change over time only. Before these steps, every edit left behind a small offset, from the cut-out wall cells and from one step in which neighbours read a new wall's old pressure. The automatic gain then showed the offset as a tint over the whole picture. A freed cell that started at 0 left a hole of silence in the sound, whose sharp edges rang at the scale of the grid. After a sounding room's walls were cleared, 98% of what remained was that ringing; with the fill, 19%. The CPU reference and the GPU do the same steps, and M0's criterion 4 scene now includes a wall edit (`docs/measurements.md`).
 
 ### 5.3 Outer absorbing layer
 
@@ -217,16 +231,18 @@ Materials are defined by the absorption coefficient α (0–1). The reflection c
 
 α = 0 is a perfectly reflecting wall; α = 1 is the same as an opening that lets the wave through.
 
-Provisional values (replace with sourced values in M1, with sources listed in `THIRD_PARTY.md`):
+Values from M1, with sources in `THIRD_PARTY.md`. Each α is the mean of the published octave-band values at 250, 500, 1000 and 2000 Hz (the bands of the NRC, without its rounding to 0.05):
 
-| Material | Display name | α |
-|---|---|---|
-| concrete | Concrete / tile | 0.02 |
-| glass | Glass | 0.05 |
-| plaster | Plasterboard | 0.08 |
-| wood | Wood panel | 0.10 |
-| curtain | Heavy curtain | 0.55 |
-| foam | Acoustic foam | 0.90 |
+| Material | Display name | α | Measured specimen |
+|---|---|---|---|
+| concrete | Concrete / tile | 0.0175 | Smooth unpainted concrete |
+| glass | Glass | 0.0375 | Glass window, 0.68 kg/m² |
+| plaster | Plasterboard | 0.06 | 2 × 13 mm plasterboard on steel frame, mineral wool in cavity, painted |
+| wood | Wood panel | 0.175 | Wooden lining, 12 mm, on frame |
+| curtain | Heavy curtain | 0.5625 | Cotton curtains, 0.5 kg/m², draped, 130 mm from the wall |
+| foam | Acoustic foam | 0.7775 | Wedge-shaped melamine foam |
+
+The provisional values were 0.02, 0.05, 0.08, 0.10, 0.55 and 0.90. Acoustic foam moved the most (0.90 → 0.78), and its reflection coefficient goes from 0.32 to 0.47.
 
 Absorption actually varies with frequency, but this idea represents it with a single value.
 
@@ -242,7 +258,7 @@ The 2D computation has no floor or ceiling, so as-is the reverberation would be 
 
 - H is the ceiling height, fixed at 2.4 m.
 - α_ceiling is fixed at 0.05.
-- α_floor is set by the "Floor" choice (provisional values: Tile 0.02, Wood 0.08, Carpet 0.30; Tatami is decided in M1 after confirming a source).
+- α_floor is set by the "Floor" choice: Tile 0.015, Wood 0.0525, Carpet 0.4325, Tatami 0.395 (M1; sources in `THIRD_PARTY.md`). The provisional values were 0.02, 0.08 and 0.30. Tatami is read off a chart in a Kumamoto Prefecture report (tatami with a 50 mm rice-straw core), to about ±0.01.
 - This formula is the floor-and-ceiling part extracted from Sabine's reverberation-time formula.
 
 ### 5.6 Sound sources
@@ -250,6 +266,8 @@ The 2D computation has no floor or ceiling, so as-is the reverberation would be 
 - Add values into the source cell and the cells within a radius of 2 cells around it, with Gaussian weights. The weights have a standard deviation of 1 cell and are normalized so the 13 cells sum to 1. Nothing is added into wall cells.
 - **Clap (for display)**: one Ricker wavelet with a center frequency of 800 Hz.
 - **Tone**: a continuous sine wave. Frequency via a 50–2000 Hz slider. On start, the volume ramps up over 20 ms.
+  - M1: a box next to the slider takes an exact frequency (71.5 Hz for the M1 check). The tone also fades out over 20 ms, and keeps its phase when the frequency changes.
+  - The source value is `3.0·√(ω·Δt)·sin(ω·t)`. A 2D source of amplitude ω·Δt gives a field that grows as √f (measured: 50 Hz is 6.2 times weaker than 2 kHz), so this keeps the tone near the level of a clap at 1 m at every frequency.
 - **For recording the response**: a short pulse band-limited at 4 kHz (windowed sinc, 129 points).
 
 ### 5.7 Recording the response
@@ -286,8 +304,10 @@ src/
     grid.ts            Constants, sizes
     sim.ts             Interface shared by the reference implementation and the GPU version
     reference.ts       CPU version of the update rule (reference implementation)
-    geometry.ts        Wall lines → cells → K, B, and D; σ of the absorbing layer
-    materials.ts       Material table, α → β
+    geometry.ts        Cells → K, B, and D; σ of the absorbing layer
+    walls.ts           Wall lines in cm: cells, erasing, snapping, hit tests
+    materials.ts       Material table with sourced band values, α → β
+    display.ts         Automatic gain, display speed, readout text
     sources.ts         Source signals and weights
     analysis.ts        FFT, peak detection
     experiments.ts     Scenes that check M0's "Done when" criteria (shared by the reference and GPU versions)
@@ -295,13 +315,14 @@ src/
     ir.ts              Calibration filter, band splitting, decay curve, RT60 (M2)
   gpu/
     solver.ts          WebGPU computation
-    render.ts          Display (Wave, Relief, Energy)
-    shaders/*.wgsl
+    render.ts          Display (Wave, Relief, Energy), loudest-cell search for the gain
+    shaders/*.wgsl     step (update rule), edit (wall changes), view, reduce
     fallback/          WebGL2 version (display only)
   bench/               Measurement page (/bench)
+  app/engine.ts        Display loop: follows the store, steps the solver, draws (M1)
   audio/engine.ts      Playback, convolution, recording
   ui/                  React components
-  state/               store.ts, url.ts
+  state/               store.ts, stats.ts, defaultScene.ts, url.ts (M3)
 public/presets/*.json  Prepared rooms
 ```
 
@@ -378,6 +399,21 @@ Done when:
 3. Changing a material from Concrete to Acoustic foam makes the weaker reflection visibly clear in the Wave view.
 4. Playing Tone at 71.5 Hz in a 4.0 m × 3.0 m room makes a diagonal standing-wave pattern appear in the Energy view.
 5. At size M, the display holds 60 fps (on the development machine).
+
+Results (2026-11-27, Apple M3, Chrome 158; details in `docs/measurements.md`):
+
+| Criterion | Measured | Verdict |
+|---|---|---|
+| 1 Drawing a room | A 10-wall plan (bedroom, closet, entry hall) is 10 drags with the mouse. Ends snap to existing ends, onto walls, to horizontal/vertical, and to 5 cm. Corners close exactly. To be confirmed by hand | Met (by script) |
+| 2 New walls respond at once | Store changes apply before the next frame's steps. The first frame after drawing a wall reads exactly 0 in every cell of the wall (pressure there was 0.117 just before) | Met |
+| 3 Concrete vs. foam | The reflected peak from foam is 0.478 of concrete's (theory √(1 − 0.7775) / √(1 − 0.0175) = 0.476). Screenshots side by side | Met |
+| 4 Tone at 71.5 Hz in 4.0 × 3.0 m | After 1 s the (1, 1) mode stands: corners 29 dB louder than the two nodal lines. The Wave view shows the diagonal checkerboard (opposite corners in phase). At 57.2 Hz the same comparison gives 7 dB | Met |
+| 5 60 fps at M | 58–59 fps, equal to or above a page that only clears a WebGPU canvas (56–58 fps on the same machine at the same time); 0 frames waited for the GPU; GPU time 5 ms per 16.7 ms frame. Size L: 60 fps | Met within what the machine gives |
+
+Notes on how it was checked:
+
+- Criterion 4: "diagonal" is read as the (1, 1) mode. Its pressure has the same sign in opposite corners (the diagonal pattern of the Wave view), and its energy is high in the four corners with a dark cross through the middle (the Energy view).
+- Criterion 5: on this machine at the time, even an empty WebGPU page dropped to 56–58 fps. In both cases the drops are pauses of the browser's main thread of 50–170 ms, a few per 10 seconds. The app never waits for the GPU, and its per-frame work takes 5 ms of GPU and about 1 ms of main thread. M1 takes care to keep that work small: the readout is written straight into the DOM rather than through React, the maxima are read back every 4th frame, and the loop reuses its objects.
 
 ### M2 Listen
 

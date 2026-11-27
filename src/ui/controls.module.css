@@ -1,0 +1,128 @@
+/* Shared controls: floating panels, buttons, segmented choices, sliders (spec 00-common 4). */
+
+.panel {
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid var(--grid);
+  border-radius: 10px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--text-1);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--grid);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out;
+}
+
+.button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-1) 8%, transparent);
+}
+
+.button:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
+.button:focus-visible,
+.segment:focus-visible,
+.slider:focus-visible,
+.select:focus-visible,
+.number:focus-visible {
+  outline: 2px solid var(--text-2);
+  outline-offset: 2px;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  gap: 2px;
+}
+
+.segment {
+  min-height: 28px;
+  min-width: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease-out,
+    color 150ms ease-out;
+}
+
+.segment:hover {
+  color: var(--text-1);
+}
+
+.segment[aria-pressed='true'],
+.segment[aria-checked='true'] {
+  background: color-mix(in srgb, var(--text-1) 14%, transparent);
+  color: var(--text-1);
+}
+
+.slider {
+  width: 100%;
+  accent-color: var(--text-2);
+  cursor: pointer;
+}
+
+.select {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--grid);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-1);
+  font: inherit;
+}
+
+.number {
+  width: 72px;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--grid);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-1);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.label {
+  color: var(--text-3);
+  font-size: var(--size-note);
+}
+
+.value {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A colour marker next to a material name (series colours never colour text). */
+.swatch {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}

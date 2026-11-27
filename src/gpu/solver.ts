@@ -10,8 +10,17 @@
 // one buffer instead, and each step selects its slot with a dynamic offset.
 
 import { COURANT, LAMBDA2 } from '../sim/grid';
-import type { Point, Sim, SimSetup } from '../sim/sim';
+import {
+  FILL_ITERATIONS,
+  FILL_REACH,
+  countAir,
+  type CellChanges,
+  type Point,
+  type Sim,
+  type SimSetup,
+} from '../sim/sim';
 import { SOURCE_WEIGHTS } from '../sim/sources';
+import editShader from './shaders/edit.wgsl?raw';
 import stepShader from './shaders/step.wgsl?raw';
 
 const WORKGROUP = 8;
@@ -44,7 +53,21 @@ interface Pipeline {
   pipeline: GPUComputePipeline;
   staticLayout: GPUBindGroupLayout;
   fieldLayout: GPUBindGroupLayout;
+  edit: Record<EditPass, GPUComputePipeline>;
+  editLayout: GPUBindGroupLayout;
 }
+
+const EDIT_PASSES = [
+  'mark',
+  'sumWalled',
+  'clearWalled',
+  'guess',
+  'gather',
+  'scatter',
+  'sumFreed',
+  'shift',
+] as const;
+type EditPass = (typeof EDIT_PASSES)[number];
 
 const pipelines = new WeakMap<GPUDevice, Pipeline>();
 
@@ -68,6 +91,7 @@ function getPipeline(device: GPUDevice): Pipeline {
       },
       { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
       { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+      { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
     ],
   });
   const fieldLayout = device.createBindGroupLayout({
@@ -85,7 +109,37 @@ function getPipeline(device: GPUDevice): Pipeline {
     layout: device.createPipelineLayout({ bindGroupLayouts: [staticLayout, fieldLayout] }),
     compute: { module, entryPoint: 'main' },
   });
-  const created = { pipeline, staticLayout, fieldLayout };
+  const editModule = device.createShaderModule({ label: 'edit', code: editShader });
+  const storage = (binding: number, type: GPUBufferBindingType): GPUBindGroupLayoutEntry => ({
+    binding,
+    visibility: GPUShaderStage.COMPUTE,
+    buffer: { type },
+  });
+  const editLayout = device.createBindGroupLayout({
+    label: 'edit',
+    entries: [
+      storage(0, 'uniform'),
+      storage(1, 'read-only-storage'),
+      storage(2, 'read-only-storage'),
+      storage(3, 'storage'),
+      storage(4, 'storage'),
+      storage(5, 'storage'),
+      storage(6, 'read-only-storage'),
+      storage(7, 'storage'),
+    ],
+  });
+  const editPipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [editLayout] });
+  const edit = Object.fromEntries(
+    EDIT_PASSES.map((entryPoint) => [
+      entryPoint,
+      device.createComputePipeline({
+        label: `edit ${entryPoint}`,
+        layout: editPipelineLayout,
+        compute: { module: editModule, entryPoint },
+      }),
+    ]),
+  ) as Record<EditPass, GPUComputePipeline>;
+  const created = { pipeline, staticLayout, fieldLayout, edit, editLayout };
   pipelines.set(device, created);
   return created;
 }
@@ -103,6 +157,8 @@ export class GpuSim implements Sim {
   private readonly params: GPUBuffer;
   private readonly stepParams: GPUBuffer;
   private readonly recording: GPUBuffer;
+  private readonly energy: GPUBuffer;
+  private freedFlags: GPUBuffer | null = null;
   private readonly staticGroup: GPUBindGroup;
   /** Indexed by stepCount mod 6. */
   private readonly fieldGroups: GPUBindGroup[];
@@ -160,6 +216,7 @@ export class GpuSim implements Sim {
     view.setFloat32(32, a.cells, true);
     view.setFloat32(36, a.sigmaMaxDt, true);
     view.setUint32(40, edges, true);
+    view.setFloat32(44, setup.energyRate ?? 0, true);
     device.queue.writeBuffer(this.params, 0, paramData);
 
     this.stepParams = device.createBuffer({
@@ -172,6 +229,7 @@ export class GpuSim implements Sim {
       size: Math.max(1, setup.recordCapacity) * 8,
       usage: storage,
     });
+    this.energy = device.createBuffer({ label: 'energy', size: cells * 4, usage: storage });
 
     this.staticGroup = device.createBindGroup({
       layout: staticLayout,
@@ -180,6 +238,7 @@ export class GpuSim implements Sim {
         { binding: 1, resource: { buffer: this.stepParams, size: 16 } },
         { binding: 2, resource: { buffer: this.coeff } },
         { binding: 3, resource: { buffer: this.recording } },
+        { binding: 4, resource: { buffer: this.energy } },
       ],
     });
     this.fieldGroups = [0, 1, 2, 3, 4, 5].map((phase) =>
@@ -212,6 +271,10 @@ export class GpuSim implements Sim {
 
   get coefficientBuffer(): GPUBuffer {
     return this.coeff;
+  }
+
+  get energyBuffer(): GPUBuffer {
+    return this.energy;
   }
 
   /**
@@ -259,13 +322,119 @@ export class GpuSim implements Sim {
     }
   }
 
-  setCoefficients(coeff: Float32Array): void {
+  setCoefficients(coeff: Float32Array, changes?: CellChanges): void {
     if (coeff.length !== this.nx * this.ny * 2) throw new Error('coeff has the wrong size');
     this.device.queue.writeBuffer(this.coeff, 0, coeff as Float32Array<ArrayBuffer>);
+    if (changes && (changes.freed.length > 0 || changes.walled.length > 0)) {
+      this.edit(changes, countAir(coeff));
+    }
+  }
+
+  /** Edit the current and the previous field after the walls changed (edit.wgsl). */
+  private edit(changes: CellChanges, air: number): void {
+    const { device } = this;
+    const { edit, editLayout } = getPipeline(device);
+    const { freed, walled } = changes;
+    const list = (label: string, cells: Uint32Array) => {
+      const buffer = device.createBuffer({
+        label,
+        size: Math.max(4, cells.byteLength),
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+      if (cells.length > 0) device.queue.writeBuffer(buffer, 0, cells as Uint32Array<ArrayBuffer>);
+      return buffer;
+    };
+    const freedList = list('freed cells', freed);
+    const walledList = list('walled cells', walled);
+    const scratch = device.createBuffer({
+      size: Math.max(4, freed.byteLength),
+      usage: GPUBufferUsage.STORAGE,
+    });
+    const sums = device.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE });
+    const params = device.createBuffer({
+      size: 32,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    const paramData = new ArrayBuffer(32);
+    const view = new DataView(paramData);
+    view.setUint32(0, freed.length, true);
+    view.setUint32(4, this.nx, true);
+    view.setUint32(8, FILL_REACH, true);
+    view.setUint32(12, walled.length, true);
+    view.setUint32(16, this.nx * this.ny, true);
+    view.setFloat32(20, Math.max(1, air), true);
+    device.queue.writeBuffer(params, 0, paramData);
+    // One flag per cell, kept for the life of the solver (an eraser stroke edits every frame).
+    this.freedFlags ??= device.createBuffer({
+      label: 'freed flags',
+      size: this.nx * this.ny * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    const isFreed = this.freedFlags;
+
+    const fields = [this.pressure[this.stepCount % 3], this.currentPressure];
+    const groups = fields.map((field) =>
+      device.createBindGroup({
+        layout: editLayout,
+        entries: [
+          { binding: 0, resource: { buffer: params } },
+          { binding: 1, resource: { buffer: freedList } },
+          { binding: 2, resource: { buffer: this.coeff } },
+          { binding: 3, resource: { buffer: field } },
+          { binding: 4, resource: { buffer: scratch } },
+          { binding: 5, resource: { buffer: isFreed } },
+          { binding: 6, resource: { buffer: walledList } },
+          { binding: 7, resource: { buffer: sums } },
+        ],
+      }),
+    );
+    const over = (count: number) => Math.max(1, Math.ceil(count / 256));
+    const encoder = device.createCommandEncoder();
+    encoder.clearBuffer(isFreed);
+    const pass = encoder.beginComputePass();
+    const run = (name: EditPass, groupsNeeded: number) => {
+      pass.setPipeline(edit[name]);
+      pass.dispatchWorkgroups(groupsNeeded);
+    };
+    pass.setBindGroup(0, groups[0]);
+    run('mark', over(freed.length));
+    for (const group of groups) {
+      pass.setBindGroup(0, group);
+      run('sumWalled', 1);
+      run('clearWalled', over(walled.length));
+      if (freed.length > 0) {
+        run('guess', over(freed.length));
+        run('scatter', over(freed.length));
+        for (let k = 0; k < FILL_ITERATIONS; k++) {
+          run('gather', over(freed.length));
+          run('scatter', over(freed.length));
+        }
+      }
+      run('sumFreed', 1);
+      run('shift', over(this.nx * this.ny));
+    }
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+    device.queue.onSubmittedWorkDone().then(() => {
+      for (const buffer of [freedList, walledList, scratch, sums, params]) buffer.destroy();
+    });
   }
 
   setSource(source: Point): void {
     this.source = source;
+  }
+
+  setEnergyRate(rate: number): void {
+    this.device.queue.writeBuffer(this.params, 44, new Float32Array([rate]));
+  }
+
+  /** Silence the field: pressure, layer velocities and the energy average back to zero. */
+  clear(): void {
+    const encoder = this.device.createCommandEncoder();
+    for (const buffer of [...this.pressure, ...this.velocity, this.energy]) {
+      encoder.clearBuffer(buffer);
+    }
+    this.device.queue.submit([encoder.finish()]);
   }
 
   private async read(buffer: GPUBuffer, bytes: number): Promise<Float32Array> {
@@ -300,6 +469,10 @@ export class GpuSim implements Sim {
     return this.read(this.currentPressure, this.nx * this.ny * 4);
   }
 
+  async readEnergy(): Promise<Float32Array> {
+    return this.read(this.energy, this.nx * this.ny * 4);
+  }
+
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
@@ -310,8 +483,10 @@ export class GpuSim implements Sim {
       this.params,
       this.stepParams,
       this.recording,
+      this.energy,
     ]) {
       buffer.destroy();
     }
+    this.freedFlags?.destroy();
   }
 }

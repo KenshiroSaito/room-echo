@@ -17,10 +17,16 @@ import {
   wallCode,
   type CellGrid,
 } from './geometry';
-import { DT, SAMPLE_RATE, SPEED_OF_SOUND, metersToCells } from './grid';
+import { DT, ENERGY_RATE, SAMPLE_RATE, SPEED_OF_SOUND, metersToCells } from './grid';
 import { WALL_MATERIALS, betaFromAlpha, floorSigma, reflectionFromAlpha } from './materials';
 import { createRng } from './rng';
-import type { Absorber, SimFactory, SimSetup } from './sim';
+import {
+  cellChanges,
+  type Absorber,
+  type CellChanges,
+  type SimFactory,
+  type SimSetup,
+} from './sim';
 import { differentiate, ricker, tone, windowedSinc } from './sources';
 
 // ---------------------------------------------------------------------------------------------
@@ -318,7 +324,14 @@ export async function measureRoomModes(
 export const AGREEMENT_STEPS = 1000;
 export const AGREEMENT_TOLERANCE = 1e-4;
 
-export function agreementScene(seed = 1): { setup: SimSetup; source: Float32Array } {
+export interface AgreementScene {
+  setup: SimSetup;
+  source: Float32Array;
+  /** Halfway through, the walls change: new coefficients and the changed cells. */
+  edit: { atStep: number; coeff: Float32Array; changes: CellChanges };
+}
+
+export function agreementScene(seed = 1): AgreementScene {
   const n = 64;
   const rng = createRng(seed);
   const grid = createGrid(n, n);
@@ -347,17 +360,31 @@ export function agreementScene(seed = 1): { setup: SimSetup; source: Float32Arra
   // A thin layer (6 cells) so that most of the small grid is room; the box wall crosses it.
   const absorber: Absorber = { ...DEFAULT_ABSORBER, cells: 6 };
   fillRect(grid, 1, 40, 8, 41, wallCode('wood'));
+  const options = { absorber, uniformSigmaDt: floorSigma(0.08) * DT };
+
+  // The edit, while the box sounds: a 3-cell-thick block of wall inside the box is removed
+  // and a new one is drawn elsewhere.
+  const before = { nx: n, ny: n, cells: grid.cells.slice() };
+  fillRect(before, 40, 20, 43, 46, wallCode('plaster'));
+  const after = { nx: n, ny: n, cells: grid.cells.slice() };
+  fillRect(after, 16, 24, 36, 27, wallCode('wood'));
   return {
     setup: {
       nx: n,
       ny: n,
-      coeff: buildCoefficients(grid, { absorber, uniformSigmaDt: floorSigma(0.08) * DT }),
+      coeff: buildCoefficients(before, options),
       absorber,
       source,
       probes,
       recordCapacity: AGREEMENT_STEPS,
+      energyRate: ENERGY_RATE,
     },
     source: signal,
+    edit: {
+      atStep: AGREEMENT_STEPS / 2,
+      coeff: buildCoefficients(after, options),
+      changes: cellChanges(before.cells, after.cells),
+    },
   };
 }
 
@@ -367,16 +394,21 @@ export interface AgreementResult {
   /** Largest |pressure| of the reference field at the last step. */
   maxAmplitude: number;
   relative: number;
+  /** Largest |a − b| of the running average of p², relative to its largest value. */
+  energyRelative: number;
   pass: boolean;
 }
 
 export async function measureAgreement(a: SimFactory, b: SimFactory): Promise<AgreementResult> {
-  const { setup, source } = agreementScene();
+  const { setup, source, edit } = agreementScene();
   const simA = await a(setup);
   const simB = await b(setup);
   try {
-    await simA.run(AGREEMENT_STEPS, source);
-    await simB.run(AGREEMENT_STEPS, source);
+    for (const sim of [simA, simB]) {
+      await sim.run(edit.atStep, source);
+      sim.setCoefficients(edit.coeff, edit.changes);
+      await sim.run(AGREEMENT_STEPS - edit.atStep, source.subarray(edit.atStep));
+    }
     const fieldA = await simA.readField();
     const fieldB = await simB.readField();
     const recA = await simA.readRecording();
@@ -395,7 +427,20 @@ export async function measureAgreement(a: SimFactory, b: SimFactory): Promise<Ag
     }
     const maxAmplitude = maxAbs(fieldA);
     const relative = maxDifference / maxAmplitude;
-    return { maxDifference, maxAmplitude, relative, pass: relative <= AGREEMENT_TOLERANCE };
+    const energyA = await simA.readEnergy();
+    const energyB = await simB.readEnergy();
+    let energyDifference = 0;
+    for (let i = 0; i < energyA.length; i++) {
+      energyDifference = Math.max(energyDifference, Math.abs(energyA[i] - energyB[i]));
+    }
+    const energyRelative = energyDifference / maxAbs(energyA);
+    return {
+      maxDifference,
+      maxAmplitude,
+      relative,
+      energyRelative,
+      pass: relative <= AGREEMENT_TOLERANCE && energyRelative <= AGREEMENT_TOLERANCE,
+    };
   } finally {
     simA.destroy();
     simB.destroy();

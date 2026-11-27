@@ -5,7 +5,7 @@
 import '../styles/tokens.css';
 import './bench.css';
 
-import { FieldView } from '../gpu/render';
+import { FieldRenderer } from '../gpu/render';
 import { GpuSim, MAX_BATCH, requestGpu } from '../gpu/solver';
 import {
   CLAP_HZ,
@@ -21,6 +21,8 @@ import {
   type WallReflectionResult,
 } from '../sim/experiments';
 import { ROOM_SIZES, SAMPLE_RATE, type RoomSize } from '../sim/grid';
+import { COMPRESSION, formatGain, formatSimTime, formatSlowdown } from '../sim/display';
+import { createGrid } from '../sim/geometry';
 import { createReferenceSim } from '../sim/reference';
 import { createRng } from '../sim/rng';
 import type { SimFactory } from '../sim/sim';
@@ -131,9 +133,11 @@ const integer = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
  */
 class Preview {
   private static readonly PERIOD = 1500; // steps between claps
-  private static readonly GAIN = 8;
+  /** Gain ×1: the loudest part of the picture is a clap at 1 m (src/sim/display.ts). */
+  private static readonly GAIN = 1;
   private readonly clap = ricker(CLAP_HZ);
-  private readonly view: FieldView;
+  private readonly view: FieldRenderer;
+  private readonly canvas: HTMLCanvasElement;
   private readonly slowdown: number;
   private sim: GpuSim;
   private rng = createRng(10);
@@ -146,15 +150,20 @@ class Preview {
     canvas: HTMLCanvasElement,
     private readonly caption: HTMLElement,
   ) {
-    this.view = new FieldView(device, canvas);
+    this.canvas = canvas;
+    this.view = new FieldRenderer(device, canvas);
     this.slowdown = matchMedia('(prefers-reduced-motion: reduce)').matches ? 240 : 120;
     this.sim = this.createSim();
   }
 
   private createSim(): GpuSim {
     const { nx, ny } = ROOM_SIZES.S;
-    const sim = new GpuSim(this.device, freeFieldSetup(nx, ny));
-    this.view.attach(sim);
+    const setup = freeFieldSetup(nx, ny);
+    const sim = new GpuSim(this.device, setup);
+    // One pixel per cell.
+    this.canvas.width = nx;
+    this.canvas.height = ny;
+    this.view.attach(sim, createGrid(nx, ny).cells);
     return sim;
   }
 
@@ -188,9 +197,23 @@ class Preview {
   }
 
   private draw(): void {
-    this.view.draw(Preview.GAIN);
-    const ms = ((this.sim.stepCount % Preview.PERIOD) / SAMPLE_RATE) * 1000;
-    this.caption.textContent = `t = ${ms.toFixed(1)} ms · Slowed ${this.slowdown}× · Gain ×${Preview.GAIN}`;
+    const { nx, ny } = this.sim;
+    this.view.frame({
+      rect: { x: 0, y: 0, width: nx, height: ny },
+      gain: Preview.GAIN,
+      compression: COMPRESSION,
+      mode: 'wave',
+      relief: false,
+      energyMax: 0,
+      pressureExclusion: null,
+      energyExclusion: null,
+    });
+    const parts = [
+      formatSimTime(this.sim.stepCount % Preview.PERIOD),
+      formatSlowdown(this.slowdown),
+      formatGain(Preview.GAIN),
+    ];
+    this.caption.textContent = parts.filter((part) => part !== null).join(' · ');
   }
 
   start(): void {
@@ -378,7 +401,10 @@ async function main(): Promise<void> {
   setState(rows.agreement.state, 'running');
   const agreement = await measureAgreement(createReferenceSim, gpuFactory);
   results.agreement = agreement;
-  showMeasured(rows.agreement, `${agreement.relative.toExponential(1)} of peak`);
+  showMeasured(
+    rows.agreement,
+    `${agreement.relative.toExponential(1)} of peak · energy ${agreement.energyRelative.toExponential(1)}`,
+  );
   setState(rows.agreement.state, agreement.pass ? 'pass' : 'fail');
 
   // 3 · Wall reflection

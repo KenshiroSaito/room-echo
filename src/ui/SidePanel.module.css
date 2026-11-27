@@ -1,0 +1,144 @@
+.panel {
+  position: fixed;
+  top: 60px;
+  right: 12px;
+  z-index: 2;
+  width: 280px;
+  max-height: calc(100vh - 60px - 96px - 24px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 4px 16px 8px;
+}
+
+.tab {
+  position: fixed;
+  top: 60px;
+  right: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.hide {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.hide:hover {
+  color: var(--text-1);
+  background: color-mix(in srgb, var(--text-1) 8%, transparent);
+}
+
+.hide:focus-visible,
+.tab:focus-visible,
+.material:focus-visible {
+  outline: 2px solid var(--text-2);
+  outline-offset: 1px;
+}
+
+.section {
+  padding: 12px 0;
+  border-top: 1px solid var(--grid);
+}
+
+.section:first-of-type {
+  border-top: 0;
+}
+
+.heading {
+  margin: 0 0 8px;
+  font-size: var(--size-note);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.materials {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.material {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease-out,
+    color 150ms ease-out;
+}
+
+.material:hover {
+  color: var(--text-1);
+  background: color-mix(in srgb, var(--text-1) 6%, transparent);
+}
+
+.material[aria-checked='true'] {
+  color: var(--text-1);
+  background: color-mix(in srgb, var(--text-1) 14%, transparent);
+}
+
+.materialName {
+  flex: 1;
+}
+
+.note {
+  margin: 8px 0 0;
+  color: var(--text-3);
+  font-size: var(--size-note);
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.check input {
+  accent-color: var(--text-2);
+}
+
+.check:has(input:disabled) {
+  color: var(--text-3);
+  cursor: default;
+}

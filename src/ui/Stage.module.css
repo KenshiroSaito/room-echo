@@ -1,0 +1,195 @@
+.surface {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.drawCursor {
+  cursor: crosshair;
+}
+
+.eraseCursor {
+  cursor: none;
+}
+
+.sourceCursor {
+  cursor: pointer;
+}
+
+.svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.hover {
+  stroke: var(--text-1);
+  stroke-opacity: 0.35;
+  stroke-linecap: round;
+}
+
+.preview {
+  stroke-opacity: 0.75;
+  stroke-linecap: round;
+}
+
+.snap {
+  fill: none;
+  stroke: var(--text-1);
+  stroke-width: 1.5;
+}
+
+.eraser {
+  fill: color-mix(in srgb, var(--text-1) 8%, transparent);
+  stroke: var(--text-1);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+
+.source {
+  fill: color-mix(in srgb, var(--canvas) 55%, transparent);
+  stroke: var(--text-1);
+  stroke-width: 2;
+}
+
+.sourceDot {
+  fill: var(--text-1);
+}
+
+/* One ring expands from the source when it claps (spec 4.4). */
+.ring {
+  fill: none;
+  stroke: var(--text-1);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+  animation: ring 600ms ease-out;
+}
+
+@keyframes ring {
+  from {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(5);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ring {
+    animation: none;
+  }
+}
+
+.wallLabel,
+.length,
+.toneLabel,
+.readout,
+.hint,
+.energyScale {
+  position: absolute;
+  pointer-events: none;
+  white-space: nowrap;
+  text-shadow:
+    0 0 3px var(--canvas),
+    0 0 6px var(--canvas);
+}
+
+.wallLabel {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-2);
+  font-size: var(--size-note);
+}
+
+.length {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--text-1);
+  font-size: var(--size-note);
+  font-variant-numeric: tabular-nums;
+  text-shadow: none;
+}
+
+/* On a pill: the tone sits where the field is loudest, often on the brightest colours. */
+.toneLabel {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--text-1);
+  font-size: var(--size-note);
+  font-variant-numeric: tabular-nums;
+  text-shadow: none;
+}
+
+.readout {
+  display: flex;
+  gap: 14px;
+  transform: translateY(-100%);
+  color: var(--text-2);
+  font-size: var(--size-note);
+  font-variant-numeric: tabular-nums;
+}
+
+.gain {
+  color: var(--text-1);
+}
+
+.hint {
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--text-1);
+  text-shadow: none;
+  animation: appear 250ms ease-out;
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -4px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.energyScale {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transform: translate(-100%, -100%);
+  color: var(--text-2);
+  font-size: var(--size-note);
+  font-variant-numeric: tabular-nums;
+}
+
+.energyBar {
+  width: 96px;
+  height: 8px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--canvas),
+    var(--seq-1),
+    var(--seq-2),
+    var(--seq-3),
+    var(--seq-4),
+    var(--seq-5)
+  );
+  box-shadow: 0 0 0 1px var(--grid);
+}
