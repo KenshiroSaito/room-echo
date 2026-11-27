@@ -10,7 +10,7 @@ The milestones are defined in [docs/spec/10-room-echo.md](docs/spec/10-room-echo
 
 ## Requirements
 
-- Node.js 24 or later
+- Node.js 24 (`package.json` pins `24.x`, so Vercel does not jump to the next major version on its own)
 - pnpm 11 (the version is pinned in `package.json`)
 - A browser with WebGPU, such as a recent Chrome. The GPU tests use the installed Chrome.
 
