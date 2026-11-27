@@ -1,6 +1,6 @@
 # Spec: Idea 10 — See and hear how a room sounds (working title: Room Echo)
 
-Common spec: [00-common.md](00-common.md). Background: [../10-room-waves.md](../10-room-waves.md).
+Common spec: [00-common.md](00-common.md).
 
 Decision: build it with sound, not Wi-Fi.
 

@@ -4,12 +4,13 @@
 
 - The specifications are [docs/spec/00-common.md](docs/spec/00-common.md) (common to all ideas) and [docs/spec/10-room-echo.md](docs/spec/10-room-echo.md) (this project). Read both before you start.
 - Work goes one milestone at a time. One change covers only one milestone. The current milestone is shown in the [README](README.md#status).
+- From M1 on, each milestone is developed on its own branch (for example `m1-draw-and-see`) and merged into `main` through a pull request. Vercel builds a preview of each pull request.
 - When the spec and the measurements disagree, the measurements win, and the spec is corrected to match. Measurements are recorded in [docs/measurements.md](docs/measurements.md).
 - A milestone is done when it meets the definition of done in the common spec (section 5): its criteria are met, `pnpm test` and `pnpm build` pass, screenshots are saved and checked, measurements are recorded, and the work is committed.
 
 ## Decisions changed by measurement
 
-- **The outer absorbing layer is a matched layer (PML)** (spec 5.3). A damping-only layer reflected low frequencies, and no setting of σ_max met −30 dB. Layer cells carry two face velocities, and the update rule gained the E and C terms (spec 5.2).
+- **The outer absorbing layer is a matched layer (PML)** (spec 5.3). A damping-only layer reflected low frequencies, and no setting of σ_max met −30 dB. Layer cells carry two face velocities, and the update rule gained the E and C terms (spec 5.2). Approved on 2026-11-26.
 - **σ_max·Δt = 0.15 is final.** The layer stays 24 cells thick.
 - **The grid is not coarsened.** 48,000 steps at size M take about 6.7 seconds (Apple M3).
 - **Criterion 3's reflection coefficient is measured as an energy ratio.** The peak ratio comes out 0.7% low because of grid dispersion.

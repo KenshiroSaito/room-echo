@@ -52,3 +52,7 @@ Then open `/bench/` on the dev server. It runs the M0 checks on your GPU and mea
 - [Room Echo specification](docs/spec/10-room-echo.md)
 - [Measurements](docs/measurements.md)
 - [Contributing](CONTRIBUTING.md): how work is organised, implementation rules and decisions made from measurements
+
+## License
+
+The code is released under the [MIT License](LICENSE).
